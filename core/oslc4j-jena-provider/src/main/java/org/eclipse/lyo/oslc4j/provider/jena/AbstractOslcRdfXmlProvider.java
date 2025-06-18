@@ -27,9 +27,15 @@ import org.apache.jena.rdf.model.Model;
 import org.apache.jena.rdf.model.ModelFactory;
 import org.apache.jena.rdf.model.RDFReaderI;
 import org.apache.jena.rdf.model.RDFWriterI;
+import org.apache.jena.rdf.model.Model;
 import org.apache.jena.riot.RDFLanguages;
 import org.apache.jena.util.FileUtils;
 import org.eclipse.lyo.oslc4j.core.OSLC4JConstants;
+import org.eclipse.lyo.oslc4j.provider.jena.JenaModelHelper; // Ensure this is imported
+// Remove JenaMarshaller, JenaUnmarshaller, JenaHelperUtils if no longer directly used
+// import org.eclipse.lyo.oslc4j.provider.jena.JenaMarshaller;
+// import org.eclipse.lyo.oslc4j.provider.jena.JenaUnmarshaller;
+// import org.eclipse.lyo.oslc4j.provider.jena.JenaHelperUtils; // Already handled for the constant
 import org.eclipse.lyo.oslc4j.core.OSLC4JUtils;
 import org.eclipse.lyo.oslc4j.core.exception.MessageExtractor;
 import org.eclipse.lyo.oslc4j.core.model.Error;
