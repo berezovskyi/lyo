@@ -22,9 +22,9 @@ import org.eclipse.lyo.core.trs.Creation;
 import org.eclipse.lyo.core.trs.Modification;
 import org.eclipse.lyo.oslc4j.trs.server.HistoryData;
 import org.eclipse.lyo.oslc4j.trs.server.TRSUtil;
-import org.junit.Assert;
-import org.junit.BeforeClass;
-import org.junit.Test;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
 
 @SuppressWarnings("deprecation")
 public class TRSUtilTest {
@@ -35,7 +35,7 @@ public class TRSUtilTest {
     static int    changeEventNum = 0;
     static int    baseMemberNum  = 0;
 
-    @BeforeClass
+    @BeforeAll
     public static void setUpBeforeClass() throws Exception {
 
         hd = HistoryData.getInstance(new Date(), new URI(baseMemberUri()), HistoryData.CREATED);
@@ -49,17 +49,17 @@ public class TRSUtilTest {
         ChangeEvent convertedCe = TRSTestUtil.historyDataToChangeEvent(hd);
         HistoryData convertedHd = TRSUtil.changeEventToHistoryData(ce);
 
-        Assert.assertTrue(convertedCe.getChanged().equals(hd.getUri()));
-        Assert.assertTrue(convertedCe.getExtendedProperties()
+        Assertions.assertTrue(convertedCe.getChanged().equals(hd.getUri()));
+        Assertions.assertTrue(convertedCe.getExtendedProperties()
                                      .get(TRSUtil.dateModifiedQname)
                                      .equals(hd.getTimestamp()));
-        Assert.assertTrue(convertedCe instanceof Creation);
+        Assertions.assertTrue(convertedCe instanceof Creation);
 
-        Assert.assertTrue(ce.getChanged().equals(convertedHd.getUri()));
-        Assert.assertTrue(ce.getExtendedProperties()
+        Assertions.assertTrue(ce.getChanged().equals(convertedHd.getUri()));
+        Assertions.assertTrue(ce.getExtendedProperties()
                             .get(TRSUtil.dateModifiedQname)
                             .equals(convertedHd.getTimestamp()));
-        Assert.assertTrue(convertedHd.getType().equals(HistoryData.MODIFIED));
+        Assertions.assertTrue(convertedHd.getType().equals(HistoryData.MODIFIED));
 
     }
 
