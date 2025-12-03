@@ -20,6 +20,7 @@ import java.util.Date;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicLong;
 
 import org.eclipse.lyo.core.trs.Base;
@@ -120,7 +121,7 @@ public class InmemPagedTrs implements PagedTrs, TrsEventHandler {
     }
 
     @Override
-    public Base getBaseResource(final Integer pageId) {
+    public synchronized Base getBaseResource(final Integer pageId) {
         int listIdx = pageIdToListIdx(pageId);
         if (listIdx  < 0 || listIdx >= baseResources.size()) {
             throw new IllegalArgumentException("There is no such Base page");
@@ -133,12 +134,12 @@ public class InmemPagedTrs implements PagedTrs, TrsEventHandler {
     }
 
     @Override
-    public int basePageCount() {
+    public synchronized int basePageCount() {
         return baseResources.size();
     }
 
     @Override
-    public ChangeLog getChangeLog(final Integer pageId) {
+    public synchronized ChangeLog getChangeLog(final Integer pageId) {
         int listIdx = pageIdToListIdx(pageId);
         if (listIdx < 0 || listIdx >= changelogResources.size()) {
             throw new IllegalArgumentException("There is no such ChangeLog page");
@@ -147,37 +148,37 @@ public class InmemPagedTrs implements PagedTrs, TrsEventHandler {
     }
 
     @Override
-    public ChangeLog getChangeLogLast() {
+    public synchronized ChangeLog getChangeLogLast() {
         return getChangeLog(changelogPageCount());
     }
 
     @Override
-    public int changelogPageCount() {
+    public synchronized int changelogPageCount() {
         return changelogResources.size();
     }
 
     @Override
-    public void onCreated(final IResource resource) {
+    public synchronized void onCreated(final IResource resource) {
         final HistoryData instance = HistoryData.getInstance(new Date(), resource.getAbout(),
                 HistoryData.CREATED);
         onHistoryData(instance);
     }
 
     @Override
-    public void onModified(final IResource resource) {
+    public synchronized void onModified(final IResource resource) {
         final HistoryData instance = HistoryData.getInstance(new Date(), resource.getAbout(),
                 HistoryData.MODIFIED);
         onHistoryData(instance);
     }
 
     @Override
-    public void onDeleted(final URI resourceUri) {
+    public synchronized void onDeleted(final URI resourceUri) {
         final HistoryData instance = HistoryData.getInstance(new Date(), resourceUri,
                 HistoryData.DELETED);
         onHistoryData(instance);
     }
 
-    public void onHistoryData(final HistoryData event) {
+    public synchronized void onHistoryData(final HistoryData event) {
         final ChangeLog changeLog = findOrCreateChangelogPage();
         final ChangeEvent changeEvent = createChangeEvent(event);
         changeLog.getChange().add(changeEvent);
@@ -249,6 +250,7 @@ public class InmemPagedTrs implements PagedTrs, TrsEventHandler {
      */
     private Base createBase() {
         final Base base = new Base();
+        base.setMembers(new CopyOnWriteArrayList<>()); // Thread-safe members list
         base.setAbout(this.createBaseUri());
         base.setNextPage(createBasePage(base, nextBasePageId()));
         base.setCutoffEvent(URI.create(TRSConstants.RDF_NIL));
@@ -294,6 +296,7 @@ public class InmemPagedTrs implements PagedTrs, TrsEventHandler {
 
     private ChangeLog createChangelogPage(final URI previous, final URI current) {
         final ChangeLog changelog = new ChangeLog();
+        changelog.setChange(new CopyOnWriteArrayList<>()); // Thread-safe change list
         changelog.setAbout(current);
         changelog.setPrevious(previous);
 
