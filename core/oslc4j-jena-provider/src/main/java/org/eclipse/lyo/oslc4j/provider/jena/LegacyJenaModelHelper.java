@@ -124,8 +124,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.w3c.dom.Element;
 
-@SuppressWarnings({"unused", "WeakerAccess"})
-public final class JenaModelHelper {
+class LegacyJenaModelHelper {
   private static final String PROPERTY_TOTAL_COUNT = "totalCount";
   private static final String PROPERTY_NEXT_PAGE = "nextPage";
 
@@ -153,9 +152,9 @@ public final class JenaModelHelper {
   @Deprecated
   public static final String OSLC4J_STRICT_DATATYPES = "org.eclipse.lyo.oslc4j.strictDatatypes";
 
-  private static final Logger logger = LoggerFactory.getLogger(JenaModelHelper.class);
+  private static final Logger logger = LoggerFactory.getLogger(LegacyJenaModelHelper.class);
 
-  private JenaModelHelper() {
+  private LegacyJenaModelHelper() {
     super();
   }
 
@@ -351,7 +350,7 @@ public final class JenaModelHelper {
   @SuppressWarnings({"unchecked", "deprecation"})
   public static <T> T unmarshal(final Resource resource, Class<T> clazz) throws LyoModelException {
     try {
-      return (T) JenaModelHelper.fromJenaResource(resource, clazz);
+      return (T) LegacyJenaModelHelper.fromJenaResource(resource, clazz);
     } catch (DatatypeConfigurationException
         | IllegalAccessException
         | InvocationTargetException
@@ -414,7 +413,7 @@ public final class JenaModelHelper {
   @SuppressWarnings({"unchecked", "deprecation"})
   public static <T> T[] unmarshal(final Model model, Class<T> clazz) throws LyoModelException {
     try {
-      final Object[] objects = JenaModelHelper.fromJenaModel(model, clazz);
+      final Object[] objects = LegacyJenaModelHelper.fromJenaModel(model, clazz);
       return (T[]) objects;
     } catch (DatatypeConfigurationException
         | IllegalAccessException
