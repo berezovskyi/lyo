@@ -19,8 +19,7 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-import org.apache.http.HttpHeaders;
-import org.apache.http.HttpStatus;
+import jakarta.ws.rs.core.HttpHeaders;
 import org.eclipse.lyo.client.exception.ResourceNotFoundException;
 import org.eclipse.lyo.oslc4j.core.model.CreationFactory;
 import org.eclipse.lyo.oslc4j.core.model.Link;
@@ -338,7 +337,7 @@ public class OslcClient implements IOslcClient {
     public String lookupServiceProviderUrl(final String catalogUrl, final String serviceProviderTitle)
             throws IOException, URISyntaxException, ResourceNotFoundException {
         Response response = getResource(catalogUrl, OSLCConstants.CT_RDF);
-        if (response.getStatus() == HttpStatus.SC_OK) {
+        if (response.getStatus() == Status.OK.getStatusCode()) {
             ServiceProviderCatalog catalog = response.readEntity(ServiceProviderCatalog.class);
             if (catalog != null) {
                 for (ServiceProvider sp : catalog.getServiceProviders()) {
