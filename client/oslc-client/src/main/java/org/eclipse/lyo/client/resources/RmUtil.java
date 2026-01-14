@@ -26,16 +26,15 @@ import org.eclipse.lyo.oslc4j.core.model.Service;
 import org.eclipse.lyo.oslc4j.core.model.ServiceProvider;
 
 import jakarta.ws.rs.core.Response;
-import net.oauth.OAuthException;
 
 @Deprecated
 public final class RmUtil {
 	public static ResourceShape lookupRequirementsInstanceShapes(final String serviceProviderUrl, final String oslcDomain, final String oslcResourceType, OslcClient client, String requiredInstanceShape)
-			throws IOException, URISyntaxException, ResourceNotFoundException, OAuthException{
+			throws IOException, URISyntaxException, ResourceNotFoundException{
 		return lookupRequirementsInstanceShapes(serviceProviderUrl, oslcDomain, oslcResourceType, client, requiredInstanceShape,null);
 	}
 	public static ResourceShape lookupRequirementsInstanceShapes(final String serviceProviderUrl, final String oslcDomain, final String oslcResourceType, OslcClient client, String requiredInstanceShape, String configurationContext)
-			throws IOException, URISyntaxException, ResourceNotFoundException, OAuthException
+			throws IOException, URISyntaxException, ResourceNotFoundException
 	{
 
 		Response response = client.getResource(serviceProviderUrl,null, OSLCConstants.CT_RDF, configurationContext);
