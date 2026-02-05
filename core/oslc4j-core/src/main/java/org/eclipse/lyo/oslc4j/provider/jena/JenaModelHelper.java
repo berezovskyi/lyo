@@ -66,6 +66,8 @@ import org.apache.jena.datatypes.xsd.impl.XMLLiteralType;
 import org.apache.jena.datatypes.xsd.impl.XSDDateType;
 import org.apache.jena.graph.Graph;
 import org.apache.jena.graph.Node;
+import org.apache.jena.ontology.OntModel;
+import org.apache.jena.ontology.OntModelSpec;
 import org.apache.jena.rdf.model.Alt;
 import org.apache.jena.rdf.model.AnonId;
 import org.apache.jena.rdf.model.Bag;
@@ -81,11 +83,15 @@ import org.apache.jena.rdf.model.ResIterator;
 import org.apache.jena.rdf.model.Resource;
 import org.apache.jena.rdf.model.Seq;
 import org.apache.jena.rdf.model.Statement;
+import org.apache.jena.rdf.model.InfModel;
 import org.apache.jena.rdf.model.StmtIterator;
 import org.apache.jena.rdf.model.impl.ReifierStd;
+import org.apache.jena.reasoner.Reasoner;
+import org.apache.jena.reasoner.ReasonerRegistry;
 import org.apache.jena.util.iterator.ExtendedIterator;
 import org.apache.jena.vocabulary.RDF;
 import org.apache.jena.vocabulary.RDFS;
+import org.apache.jena.vocabulary.ReasonerVocabulary;
 import org.eclipse.lyo.oslc4j.core.NestedWildcardProperties;
 import org.eclipse.lyo.oslc4j.core.OSLC4JConstants;
 import org.eclipse.lyo.oslc4j.core.OSLC4JUtils;
@@ -319,6 +325,72 @@ public final class JenaModelHelper {
     if (descriptionResource != null) {
       descriptionResource.addProperty(RDFS.member, mainResource);
     }
+  }
+
+  /**
+   * Unmarshals a resource from a Jena model using an inference model based on the provided TBox and
+   * OntModelSpec.
+   *
+   * @param model Data model
+   * @param uri URI of the resource to unmarshal
+   * @param clazz Target Java class
+   * @param tbox TBox model (schema/ontology)
+   * @param spec Ontology model specification (e.g. OntModelSpec.OWL_DL_MEM)
+   * @param <T> Target type
+   * @return Unmarshalled instance
+   * @throws LyoModelException if unmarshalling fails
+   */
+  public static <T> T fromJenaModelExact(
+      final Model model,
+      final URI uri,
+      final Class<T> clazz,
+      final Model tbox,
+      final OntModelSpec spec)
+      throws LyoModelException {
+    final OntModel ontModel = ModelFactory.createOntologyModel(spec, model);
+    if (tbox != null) {
+      ontModel.addSubModel(tbox);
+    }
+
+    Resource resource = ontModel.getResource(uri.toString());
+    return unmarshal(resource, clazz);
+  }
+
+  /**
+   * Unmarshals a resource from a Jena model using an inference model based on the provided TBox and
+   * reasoner URI.
+   *
+   * @param model Data model
+   * @param uri URI of the resource to unmarshal
+   * @param clazz Target Java class
+   * @param tbox TBox model (schema/ontology)
+   * @param reasonerUri URI of the reasoner (e.g. ReasonerVocabulary.RDFS_SIMPLE)
+   * @param <T> Target type
+   * @return Unmarshalled instance
+   * @throws LyoModelException if unmarshalling fails
+   */
+  public static <T> T fromJenaModelExact(
+      final Model model,
+      final URI uri,
+      final Class<T> clazz,
+      final Model tbox,
+      final String reasonerUri)
+      throws LyoModelException {
+    Reasoner reasoner;
+    if (ReasonerVocabulary.RDFS_SIMPLE.equals(reasonerUri)) {
+      reasoner = ReasonerRegistry.getRDFSSimpleReasoner();
+    } else if (ReasonerVocabulary.RDFS_DEFAULT.equals(reasonerUri)) {
+      reasoner = ReasonerRegistry.getRDFSReasoner();
+    } else {
+      reasoner = ReasonerRegistry.theRegistry().create(reasonerUri, null);
+    }
+
+    if (tbox != null) {
+      reasoner = reasoner.bindSchema(tbox);
+    }
+    InfModel infModel = ModelFactory.createInfModel(reasoner, model);
+    Resource resource = infModel.getResource(uri.toString());
+    return unmarshal(resource, clazz);
   }
 
   /**
