@@ -328,14 +328,11 @@ public final class JenaModelHelper {
   }
 
   /**
-   * Unmarshals a resource from a Jena model using an inference model based on the provided TBox and
-   * OntModelSpec.
+   * Unmarshals a resource from a Jena model without reasoning.
    *
    * @param model Data model
    * @param uri URI of the resource to unmarshal
    * @param clazz Target Java class
-   * @param tbox TBox model (schema/ontology)
-   * @param spec Ontology model specification (e.g. OntModelSpec.OWL_DL_MEM)
    * @param <T> Target type
    * @return Unmarshalled instance
    * @throws LyoModelException if unmarshalling fails
@@ -343,6 +340,48 @@ public final class JenaModelHelper {
   public static <T> T fromJenaModelExact(
       final Model model,
       final URI uri,
+      final Class<T> clazz)
+      throws LyoModelException {
+    return unmarshal(model.getResource(uri.toString()), clazz);
+  }
+
+  /**
+   * Unmarshals resources from a Jena model using an inference model based on the provided TBox and
+   * OntModelSpec.
+   *
+   * @param model Data model
+   * @param clazz Target Java class
+   * @param tbox TBox model (schema/ontology)
+   * @param spec Ontology model specification (e.g. OntModelSpec.OWL_DL_MEM)
+   * @param <T> Target type
+   * @return Array of unmarshalled instances
+   * @throws LyoModelException if unmarshalling fails
+   */
+  public static <T> T[] fromJenaModelInferred(
+      final Model model,
+      final Class<T> clazz,
+      final Model tbox,
+      final OntModelSpec spec)
+      throws LyoModelException {
+    return fromJenaModelInferred(model, null, clazz, tbox, spec);
+  }
+
+  /**
+   * Unmarshals resources from a Jena model using an inference model based on the provided TBox and
+   * OntModelSpec.
+   *
+   * @param model Data model
+   * @param typeUri Explicit type URI to search for (optional)
+   * @param clazz Target Java class
+   * @param tbox TBox model (schema/ontology)
+   * @param spec Ontology model specification (e.g. OntModelSpec.OWL_DL_MEM)
+   * @param <T> Target type
+   * @return Array of unmarshalled instances
+   * @throws LyoModelException if unmarshalling fails
+   */
+  public static <T> T[] fromJenaModelInferred(
+      final Model model,
+      final URI typeUri,
       final Class<T> clazz,
       final Model tbox,
       final OntModelSpec spec)
@@ -352,26 +391,46 @@ public final class JenaModelHelper {
       ontModel.addSubModel(tbox);
     }
 
-    Resource resource = ontModel.getResource(uri.toString());
-    return unmarshal(resource, clazz);
+    return fromJenaModelInferredInternal(ontModel, typeUri, clazz);
   }
 
   /**
-   * Unmarshals a resource from a Jena model using an inference model based on the provided TBox and
+   * Unmarshals resources from a Jena model using an inference model based on the provided TBox and
    * reasoner URI.
    *
    * @param model Data model
-   * @param uri URI of the resource to unmarshal
    * @param clazz Target Java class
    * @param tbox TBox model (schema/ontology)
    * @param reasonerUri URI of the reasoner (e.g. ReasonerVocabulary.RDFS_SIMPLE)
    * @param <T> Target type
-   * @return Unmarshalled instance
+   * @return Array of unmarshalled instances
    * @throws LyoModelException if unmarshalling fails
    */
-  public static <T> T fromJenaModelExact(
+  public static <T> T[] fromJenaModelInferred(
       final Model model,
-      final URI uri,
+      final Class<T> clazz,
+      final Model tbox,
+      final String reasonerUri)
+      throws LyoModelException {
+    return fromJenaModelInferred(model, null, clazz, tbox, reasonerUri);
+  }
+
+  /**
+   * Unmarshals resources from a Jena model using an inference model based on the provided TBox and
+   * reasoner URI.
+   *
+   * @param model Data model
+   * @param typeUri Explicit type URI to search for (optional)
+   * @param clazz Target Java class
+   * @param tbox TBox model (schema/ontology)
+   * @param reasonerUri URI of the reasoner (e.g. ReasonerVocabulary.RDFS_SIMPLE)
+   * @param <T> Target type
+   * @return Array of unmarshalled instances
+   * @throws LyoModelException if unmarshalling fails
+   */
+  public static <T> T[] fromJenaModelInferred(
+      final Model model,
+      final URI typeUri,
       final Class<T> clazz,
       final Model tbox,
       final String reasonerUri)
@@ -389,8 +448,57 @@ public final class JenaModelHelper {
       reasoner = reasoner.bindSchema(tbox);
     }
     InfModel infModel = ModelFactory.createInfModel(reasoner, model);
-    Resource resource = infModel.getResource(uri.toString());
-    return unmarshal(resource, clazz);
+    return fromJenaModelInferredInternal(infModel, typeUri, clazz);
+  }
+
+  @SuppressWarnings("unchecked")
+  private static <T> T[] fromJenaModelInferredInternal(
+      final Model model, final URI typeUri, final Class<T> clazz) throws LyoModelException {
+    final List<Object> results = new ArrayList<>();
+    final Map<org.apache.jena.graph.Triple, List<Statement>> reificationCache =
+        buildReificationCache(model);
+
+    List<Resource> resourceList = new ArrayList<>();
+
+    if (typeUri != null) {
+      // If typeUri is provided, use it.
+      ResIterator listSubjects =
+          model.listSubjectsWithProperty(RDF.type, model.getResource(typeUri.toString()));
+      while (listSubjects.hasNext()) {
+        resourceList.add(listSubjects.next());
+      }
+    } else {
+      // Otherwise fallback to standard logic (using annotation or list all)
+      if (!OSLC4JUtils.useBeanClassForParsing()) {
+        final String qualifiedName = TypeFactory.getQualifiedName(clazz);
+        ResIterator listSubjects =
+            model.listSubjectsWithProperty(RDF.type, model.getResource(qualifiedName));
+        resourceList = listSubjects.toList();
+      } else {
+        ResIterator listSubjects = model.listSubjectsWithProperty(RDF.type);
+        while (listSubjects.hasNext()) {
+          final Resource resource = listSubjects.next();
+          StmtIterator listStatements = model.listStatements(null, null, resource);
+          if (!listStatements.hasNext()) {
+            resourceList.add(resource);
+          }
+        }
+      }
+    }
+
+    try {
+      createObjectResultList(clazz, results, resourceList, reificationCache);
+    } catch (IllegalAccessException
+        | InstantiationException
+        | DatatypeConfigurationException
+        | InvocationTargetException
+        | OslcCoreApplicationException
+        | URISyntaxException
+        | NoSuchMethodException e) {
+      throw new LyoModelException(e);
+    }
+
+    return results.toArray((T[]) Array.newInstance(clazz, results.size()));
   }
 
   /**
