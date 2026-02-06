@@ -66,8 +66,6 @@ import org.apache.jena.datatypes.xsd.impl.XMLLiteralType;
 import org.apache.jena.datatypes.xsd.impl.XSDDateType;
 import org.apache.jena.graph.Graph;
 import org.apache.jena.graph.Node;
-import org.apache.jena.ontology.OntModel;
-import org.apache.jena.ontology.OntModelSpec;
 import org.apache.jena.rdf.model.Alt;
 import org.apache.jena.rdf.model.AnonId;
 import org.apache.jena.rdf.model.Bag;
@@ -345,54 +343,6 @@ public final class JenaModelHelper {
     return unmarshal(model.getResource(uri.toString()), clazz);
   }
 
-  /**
-   * Unmarshals resources from a Jena model using an inference model based on the provided TBox and
-   * OntModelSpec.
-   *
-   * @param model Data model
-   * @param clazz Target Java class
-   * @param tbox TBox model (schema/ontology)
-   * @param spec Ontology model specification (e.g. OntModelSpec.OWL_DL_MEM)
-   * @param <T> Target type
-   * @return Array of unmarshalled instances
-   * @throws LyoModelException if unmarshalling fails
-   */
-  public static <T> T[] fromJenaModelInferred(
-      final Model model,
-      final Class<T> clazz,
-      final Model tbox,
-      final OntModelSpec spec)
-      throws LyoModelException {
-    return fromJenaModelInferred(model, null, clazz, tbox, spec);
-  }
-
-  /**
-   * Unmarshals resources from a Jena model using an inference model based on the provided TBox and
-   * OntModelSpec.
-   *
-   * @param model Data model
-   * @param typeUri Explicit type URI to search for (optional)
-   * @param clazz Target Java class
-   * @param tbox TBox model (schema/ontology)
-   * @param spec Ontology model specification (e.g. OntModelSpec.OWL_DL_MEM)
-   * @param <T> Target type
-   * @return Array of unmarshalled instances
-   * @throws LyoModelException if unmarshalling fails
-   */
-  public static <T> T[] fromJenaModelInferred(
-      final Model model,
-      final URI typeUri,
-      final Class<T> clazz,
-      final Model tbox,
-      final OntModelSpec spec)
-      throws LyoModelException {
-    final OntModel ontModel = ModelFactory.createOntologyModel(spec, model);
-    if (tbox != null) {
-      ontModel.addSubModel(tbox);
-    }
-
-    return fromJenaModelInferredInternal(ontModel, typeUri, clazz);
-  }
 
   /**
    * Unmarshals resources from a Jena model using an inference model based on the provided TBox and
