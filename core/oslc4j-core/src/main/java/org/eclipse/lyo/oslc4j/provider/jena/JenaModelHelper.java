@@ -66,6 +66,9 @@ import org.apache.jena.datatypes.xsd.impl.XMLLiteralType;
 import org.apache.jena.datatypes.xsd.impl.XSDDateType;
 import org.apache.jena.graph.Graph;
 import org.apache.jena.graph.Node;
+import org.apache.jena.ontapi.OntModelFactory;
+import org.apache.jena.ontapi.OntSpecification;
+import org.apache.jena.ontapi.model.OntModel;
 import org.apache.jena.rdf.model.Alt;
 import org.apache.jena.rdf.model.AnonId;
 import org.apache.jena.rdf.model.Bag;
@@ -343,6 +346,89 @@ public final class JenaModelHelper {
     return unmarshal(model.getResource(uri.toString()), clazz);
   }
 
+
+  /**
+   * Unmarshals resources from a Jena model using an inference model based on the provided TBox and
+   * OntSpecification.
+   *
+   * @param model Data model
+   * @param clazz Target Java class
+   * @param tbox TBox model (schema/ontology)
+   * @param spec Ontology model specification (e.g. OntModelSpec.OWL_DL_MEM_RDFS_INF or OntSpecification.OWL2_DL_MEM_RDFS_INF)
+   * @param <T> Target type
+   * @return Array of unmarshalled instances
+   * @throws LyoModelException if unmarshalling fails
+   */
+  public static <T> T[] fromJenaModelInferred(
+      final Model model,
+      final Class<T> clazz,
+      final Model tbox,
+      final OntSpecification spec)
+      throws LyoModelException {
+    return fromJenaModelInferred(model, null, clazz, tbox, spec);
+  }
+
+  /**
+   * Unmarshals resources from a Jena model using an inference model based on the provided TBox and
+   * OntSpecification.
+   *
+   * @param model Data model
+   * @param typeUri Explicit type URI to search for (optional)
+   * @param clazz Target Java class
+   * @param tbox TBox model (schema/ontology)
+   * @param spec Ontology model specification (e.g. OntModelSpec.OWL_DL_MEM_RDFS_INF or OntSpecification.OWL2_DL_MEM_RDFS_INF)
+   * @param <T> Target type
+   * @return Array of unmarshalled instances
+   * @throws LyoModelException if unmarshalling fails
+   */
+  public static <T> T[] fromJenaModelInferred(
+      final Model model,
+      final URI typeUri,
+      final Class<T> clazz,
+      final Model tbox,
+      final OntSpecification spec)
+      throws LyoModelException {
+    // Note: OntModelFactory.createModel wraps the graph.
+    // addImportModel is usually preferred for managing imports in OntModel, but addSubModel/add works on the graph union level.
+    // OntModel in OntAPI wraps the graph directly.
+    final OntModel ontModel = OntModelFactory.createModel(model.getGraph(), spec);
+    if (tbox != null) {
+      // In OntAPI, we can add the TBox model as a sub-model (import) to avoid polluting the data graph.
+      // But OntModel in OntAPI handles imports differently.
+      // A simple approach is adding the TBox graph as a sub-graph if possible, or using imports.
+      // For now, let's try assuming the user wants to reason over Data + TBox.
+      // We can use a union graph or similar.
+      // However, OntAPI's createModel takes a Graph.
+      // We can manually add the TBox triples if we accept mutation, OR create a Union graph first.
+      // To mimic legacy addSubModel behavior safely:
+      // Actually, OntModel in Jena 6 might not support addSubModel in the same way.
+      // Let's use Graph union to be safe and non-mutating to original model if possible.
+      // But we passed model.getGraph() which is live.
+      // If we want to avoid polluting 'model', we should create a Union graph of (model, tbox) and then wrap it.
+      // But OntModelFactory usually expects a single Graph which it might wrap.
+
+      // Let's check if we can just add the TBox as an import?
+      // ontModel.addImport(tbox.getGraph()); // conceptual
+      // But TBox might just be a Model.
+
+      // Safe fallback: Union graph.
+      // MultiUnion union = new MultiUnion(new Graph[]{model.getGraph(), tbox.getGraph()});
+      // But OntModelFactory.createModel(Graph, Spec) expects the base graph.
+
+      // Simpler: Just add the triples to the OntModel which wraps the base model.
+      // WAIT, this pollutes the base model!
+      // We must avoid that.
+
+      // Recommendation: Create an in-memory OntModel that imports the data model and the tbox model?
+      // Or create a Union Model.
+
+      Model union = ModelFactory.createUnion(model, tbox);
+      OntModel unionOntModel = OntModelFactory.createModel(union.getGraph(), spec);
+      return fromJenaModelInferredInternal(unionOntModel, typeUri, clazz);
+    }
+
+    return fromJenaModelInferredInternal(ontModel, typeUri, clazz);
+  }
 
   /**
    * Unmarshals resources from a Jena model using an inference model based on the provided TBox and
