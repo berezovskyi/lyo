@@ -65,6 +65,7 @@ import org.apache.jena.datatypes.xsd.XSDDateTime;
 import org.apache.jena.datatypes.xsd.impl.XSDDateType;
 import org.apache.jena.graph.Graph;
 import org.apache.jena.graph.Node;
+import org.apache.jena.ontapi.OntSpecification;
 import org.apache.jena.rdf.model.Alt;
 import org.apache.jena.rdf.model.AnonId;
 import org.apache.jena.rdf.model.Bag;
@@ -80,11 +81,15 @@ import org.apache.jena.rdf.model.ResIterator;
 import org.apache.jena.rdf.model.Resource;
 import org.apache.jena.rdf.model.Seq;
 import org.apache.jena.rdf.model.Statement;
+import org.apache.jena.rdf.model.InfModel;
 import org.apache.jena.rdf.model.StmtIterator;
 import org.apache.jena.rdf.model.impl.ReifierStd;
+import org.apache.jena.reasoner.Reasoner;
+import org.apache.jena.reasoner.ReasonerRegistry;
 import org.apache.jena.util.iterator.ExtendedIterator;
 import org.apache.jena.vocabulary.RDF;
 import org.apache.jena.vocabulary.RDFS;
+import org.apache.jena.vocabulary.ReasonerVocabulary;
 import org.eclipse.lyo.oslc4j.core.NestedWildcardProperties;
 import org.eclipse.lyo.oslc4j.core.OSLC4JConstants;
 import org.eclipse.lyo.oslc4j.core.OSLC4JUtils;
@@ -318,6 +323,190 @@ public final class JenaModelHelper {
     if (descriptionResource != null) {
       descriptionResource.addProperty(RDFS.member, mainResource);
     }
+  }
+
+  /**
+   * Unmarshals a resource from a Jena model without reasoning.
+   *
+   * @param model Data model
+   * @param uri URI of the resource to unmarshal
+   * @param clazz Target Java class
+   * @param <T> Target type
+   * @return Unmarshalled instance
+   * @throws LyoModelException if unmarshalling fails
+   */
+  public static <T> T fromJenaModelExact(
+      final Model model,
+      final URI uri,
+      final Class<T> clazz)
+      throws LyoModelException {
+    return unmarshal(model.getResource(uri.toString()), clazz);
+  }
+
+
+  /**
+   * Unmarshals resources from a Jena model using an inference model based on the provided TBox and
+   * OntSpecification.
+   *
+   * @param model Data model
+   * @param clazz Target Java class
+   * @param tbox TBox model (schema/ontology)
+   * @param spec Ontology model specification (e.g. OntModelSpec.OWL_DL_MEM_RDFS_INF or OntSpecification.OWL2_DL_MEM_RDFS_INF)
+   * @param <T> Target type
+   * @return Array of unmarshalled instances
+   * @throws LyoModelException if unmarshalling fails
+   */
+  public static <T> T[] fromJenaModelInferred(
+      final Model model,
+      final Class<T> clazz,
+      final Model tbox,
+      final OntSpecification spec)
+      throws LyoModelException {
+    return fromJenaModelInferred(model, null, clazz, tbox, spec);
+  }
+
+  /**
+   * Unmarshals resources from a Jena model using an inference model based on the provided TBox and
+   * OntSpecification.
+   *
+   * @param model Data model
+   * @param typeUri Explicit type URI to search for (optional)
+   * @param clazz Target Java class
+   * @param tbox TBox model (schema/ontology)
+   * @param spec Ontology model specification (e.g. OntModelSpec.OWL_DL_MEM_RDFS_INF or OntSpecification.OWL2_DL_MEM_RDFS_INF)
+   * @param <T> Target type
+   * @return Array of unmarshalled instances
+   * @throws LyoModelException if unmarshalling fails
+   */
+  public static <T> T[] fromJenaModelInferred(
+      final Model model,
+      final URI typeUri,
+      final Class<T> clazz,
+      final Model tbox,
+      final OntSpecification spec)
+      throws LyoModelException {
+    org.apache.jena.reasoner.ReasonerFactory rf = spec.getReasonerFactory();
+    if (rf == null) {
+      Model targetModel = model;
+      if (tbox != null) {
+        targetModel = ModelFactory.createUnion(model, tbox);
+      }
+      return fromJenaModelInferredInternal(targetModel, typeUri, clazz);
+    } else {
+      org.apache.jena.reasoner.Reasoner reasoner = rf.create(null);
+      if (tbox != null) {
+        reasoner = reasoner.bindSchema(tbox);
+      }
+      InfModel infModel = ModelFactory.createInfModel(reasoner, model);
+      return fromJenaModelInferredInternal(infModel, typeUri, clazz);
+    }
+  }
+
+  /**
+   * Unmarshals resources from a Jena model using an inference model based on the provided TBox and
+   * reasoner URI.
+   *
+   * @param model Data model
+   * @param clazz Target Java class
+   * @param tbox TBox model (schema/ontology)
+   * @param reasonerUri URI of the reasoner (e.g. ReasonerVocabulary.RDFS_SIMPLE)
+   * @param <T> Target type
+   * @return Array of unmarshalled instances
+   * @throws LyoModelException if unmarshalling fails
+   */
+  public static <T> T[] fromJenaModelInferred(
+      final Model model,
+      final Class<T> clazz,
+      final Model tbox,
+      final String reasonerUri)
+      throws LyoModelException {
+    return fromJenaModelInferred(model, null, clazz, tbox, reasonerUri);
+  }
+
+  /**
+   * Unmarshals resources from a Jena model using an inference model based on the provided TBox and
+   * reasoner URI.
+   *
+   * @param model Data model
+   * @param typeUri Explicit type URI to search for (optional)
+   * @param clazz Target Java class
+   * @param tbox TBox model (schema/ontology)
+   * @param reasonerUri URI of the reasoner (e.g. ReasonerVocabulary.RDFS_SIMPLE)
+   * @param <T> Target type
+   * @return Array of unmarshalled instances
+   * @throws LyoModelException if unmarshalling fails
+   */
+  public static <T> T[] fromJenaModelInferred(
+      final Model model,
+      final URI typeUri,
+      final Class<T> clazz,
+      final Model tbox,
+      final String reasonerUri)
+      throws LyoModelException {
+    Reasoner reasoner;
+    if (ReasonerVocabulary.RDFS_SIMPLE.equals(reasonerUri)) {
+      reasoner = ReasonerRegistry.getRDFSSimpleReasoner();
+    } else if (ReasonerVocabulary.RDFS_DEFAULT.equals(reasonerUri)) {
+      reasoner = ReasonerRegistry.getRDFSReasoner();
+    } else {
+      reasoner = ReasonerRegistry.theRegistry().create(reasonerUri, null);
+    }
+
+    if (tbox != null) {
+      reasoner = reasoner.bindSchema(tbox);
+    }
+    InfModel infModel = ModelFactory.createInfModel(reasoner, model);
+    return fromJenaModelInferredInternal(infModel, typeUri, clazz);
+  }
+
+  @SuppressWarnings("unchecked")
+  private static <T> T[] fromJenaModelInferredInternal(
+      final Model model, final URI typeUri, final Class<T> clazz) throws LyoModelException {
+    final List<Object> results = new ArrayList<>();
+    final Map<org.apache.jena.graph.Triple, List<Statement>> reificationCache =
+        buildReificationCache(model);
+
+    List<Resource> resourceList = new ArrayList<>();
+
+    if (typeUri != null) {
+      // If typeUri is provided, use it.
+      ResIterator listSubjects =
+          model.listSubjectsWithProperty(RDF.type, model.getResource(typeUri.toString()));
+      while (listSubjects.hasNext()) {
+        resourceList.add(listSubjects.next());
+      }
+    } else {
+      // Otherwise fallback to standard logic (using annotation or list all)
+      if (!OSLC4JUtils.useBeanClassForParsing()) {
+        final String qualifiedName = TypeFactory.getQualifiedName(clazz);
+        ResIterator listSubjects =
+            model.listSubjectsWithProperty(RDF.type, model.getResource(qualifiedName));
+        resourceList = listSubjects.toList();
+      } else {
+        ResIterator listSubjects = model.listSubjectsWithProperty(RDF.type);
+        while (listSubjects.hasNext()) {
+          final Resource resource = listSubjects.next();
+          StmtIterator listStatements = model.listStatements(null, null, resource);
+          if (!listStatements.hasNext()) {
+            resourceList.add(resource);
+          }
+        }
+      }
+    }
+
+    try {
+      createObjectResultList(clazz, results, resourceList, reificationCache);
+    } catch (IllegalAccessException
+        | InstantiationException
+        | DatatypeConfigurationException
+        | InvocationTargetException
+        | OslcCoreApplicationException
+        | URISyntaxException
+        | NoSuchMethodException e) {
+      throw new LyoModelException(e);
+    }
+
+    return results.toArray((T[]) Array.newInstance(clazz, results.size()));
   }
 
   /**

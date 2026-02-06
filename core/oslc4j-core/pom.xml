@@ -50,6 +50,11 @@
       </exclusions>
     </dependency>
     <dependency>
+      <groupId>org.apache.jena</groupId>
+      <artifactId>jena-ontapi</artifactId>
+      <version>${v.jena}</version>
+    </dependency>
+    <dependency>
       <groupId>org.apache.httpcomponents</groupId>
       <artifactId>httpclient</artifactId>
       <exclusions>
