@@ -15,8 +15,9 @@ import org.glassfish.jersey.test.TestProperties;
 import org.glassfish.jersey.test.grizzly.GrizzlyTestContainerFactory;
 import org.glassfish.jersey.test.spi.TestContainerException;
 import org.glassfish.jersey.test.spi.TestContainerFactory;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import jakarta.ws.rs.core.Application;
 import jakarta.ws.rs.core.Response;
@@ -42,15 +43,22 @@ public class TRSServiceTest extends JerseyTest {
     protected Application configure() {
         enable(TestProperties.LOG_TRAFFIC);
         enable(TestProperties.DUMP_ENTITY);
+        forceSet(TestProperties.CONTAINER_PORT, "0");
 
         return new ResourceConfig(TRSServiceResource.class).registerClasses(
                 JenaProvidersRegistry.getProviders());
     }
 
-    @Before
-    public void setUpUri() throws Exception {
+    @BeforeEach
+    public void setUp() throws Exception {
+        super.setUp();
         OSLC4JUtils.setPublicURI(getBaseUri().toString());
         OSLC4JUtils.setServletPath("/");
+    }
+
+    @AfterEach
+    public void tearDown() throws Exception {
+        super.tearDown();
     }
 
     @Test
