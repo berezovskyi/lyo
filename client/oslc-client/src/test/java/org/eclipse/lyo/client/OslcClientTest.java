@@ -16,7 +16,7 @@ package org.eclipse.lyo.client;
 import jakarta.ws.rs.client.Invocation.Builder;
 import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.core.Response.Status.Family;
-import org.apache.http.HttpHeaders;
+import jakarta.ws.rs.core.HttpHeaders;
 import org.eclipse.lyo.oslc4j.core.model.ServiceProvider;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;

@@ -21,15 +21,6 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.util.HashMap;
 import java.util.Map;
-import org.apache.http.HttpEntity;
-import org.apache.http.HttpResponse;
-import org.apache.http.StatusLine;
-import org.apache.http.client.ClientProtocolException;
-import org.apache.http.client.HttpClient;
-import org.apache.http.client.methods.HttpPost;
-import org.apache.http.entity.StringEntity;
-import org.apache.http.impl.client.DefaultRedirectStrategy;
-import org.apache.http.impl.client.HttpClientBuilder;
 import org.apache.jena.rdf.model.Model;
 import org.apache.jena.rdf.model.ModelFactory;
 import org.apache.jena.rdf.model.Property;
@@ -300,56 +291,4 @@ public class RootServicesHelper {
         .toString();
   }
 
-  public String requestConsumerKey(String consumerName, String consumerSecret)
-      throws ClientProtocolException, IOException {
-    String postData =
-        "{\"trusted\":true, \"secretType\":\"string\", \"name\":\""
-            + consumerName
-            + "\", \"secret\":\""
-            + consumerSecret
-            + "\"}";
-    HttpResponse response = null;
-    StringEntity postDataEntity = new StringEntity(postData);
-
-    HttpClient client =
-        HttpClientBuilder.create()
-            .setRedirectStrategy(
-                new DefaultRedirectStrategy()) // Lax strategy has problems with HTTPS upgrade
-            .build();
-    HttpPost request = new HttpPost(requestConsumerKeyUrl);
-    request.addHeader("Content-Type", MediaType.APPLICATION_JSON);
-    request.addHeader("Accept", MediaType.APPLICATION_JSON);
-    request.setEntity(postDataEntity);
-    response = client.execute(request);
-    HttpEntity entity = response.getEntity();
-    final StatusLine statusLine = response.getStatusLine();
-    if (statusLine.getStatusCode() > 399) {
-      throw new IllegalStateException(
-          String.format(
-              "Server reported an error: %s %s",
-              statusLine.getStatusCode(), statusLine.getReasonPhrase()));
-    } else if (statusLine.getStatusCode() > 299) {
-      final String newLocation = response.getFirstHeader("Location").getValue();
-      if (requestConsumerKeyUrl.equals(newLocation)) {
-        throw new IllegalStateException(
-            "Redirect loop detected while trying to request consumer key");
-      }
-      requestConsumerKeyUrl = newLocation; // TODO: 2020-11-19 refactor to an argument
-      logger.debug("Following the redirect for consumer key to {}", requestConsumerKeyUrl);
-      return requestConsumerKey(consumerName, consumerSecret);
-    }
-    InputStream content = entity.getContent();
-    if (!response.getFirstHeader("Content-Type").getValue().toLowerCase().contains("json")) {
-      // trying to be liberal with all possible JSON content types
-      throw new IllegalStateException("Server returned something else than JSON in the response");
-    }
-    ObjectMapper mapper = new ObjectMapper();
-    Map<String, Object> jsonData = new HashMap<>();
-    jsonData = mapper.readValue(content, Map.class);
-    String consumerKey = (String) jsonData.get("key");
-    logger.debug(
-        "Consumer should redirect user to this approval URL, to approve the OAuth consumer: "
-            + getConsumerApprovalUrl(consumerKey));
-    return consumerKey;
-  }
 }
