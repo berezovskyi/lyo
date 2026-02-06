@@ -119,9 +119,11 @@ public class InferenceTest {
     @Test
     public void testGenericResourceRoundTrip() throws Exception {
         String resourceUri = "http://example.com/r1";
+        String acmeReqType = "http://acme.com/ns#AcmeRequirement";
         Model originalModel = ModelFactory.createDefaultModel();
         Resource r = originalModel.createResource(resourceUri);
-        r.addProperty(RDF.type, org.apache.jena.vocabulary.RDFS.Resource);
+        // Use acme:AcmeRequirement as the resource type
+        r.addProperty(RDF.type, originalModel.createResource(acmeReqType));
         r.addProperty(originalModel.createProperty("http://example.com/ns#prop1"), "Value 1");
         r.addProperty(originalModel.createProperty("http://example.com/ns#prop2"), "Value 2");
 
@@ -130,6 +132,7 @@ public class InferenceTest {
 
         assertNotNull(generic);
         assertEquals(URI.create(resourceUri), generic.getAbout());
+        assertTrue("Generic resource should capture custom type", generic.getTypes().contains(URI.create(acmeReqType)));
 
         // Verify extended properties
         Map<QName, Object> props = generic.getExtendedProperties();
@@ -139,7 +142,12 @@ public class InferenceTest {
         // Marshal back to Model
         Model marshalledModel = JenaModelHelper.createJenaModel(new Object[]{generic});
 
-        // Let's add the expected types to the original model so isomorphism passes.
+        // The marshalled model will include:
+        // 1. The original triples (properties and acme:AcmeRequirement type).
+        // 2. rdf:type rdfs:Resource (added by GenericOslcResource constructor).
+        // 3. rdf:type <java:GenericOslcResource> (derived from class annotation/structure by JenaModelHelper).
+
+        // To verify isomorphism, we add these expected types to the original model expectation.
         originalModel.add(r, RDF.type, originalModel.createResource("http://www.w3.org/2000/01/rdf-schema#GenericOslcResource"));
 
         JenaAssert.assertThat(marshalledModel).isomorphicWith(originalModel);
