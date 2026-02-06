@@ -42,8 +42,8 @@ import org.apache.jena.datatypes.RDFDatatype;
 import org.apache.jena.datatypes.TypeMapper;
 import org.apache.jena.datatypes.xsd.XSDDatatype;
 import org.apache.jena.datatypes.xsd.XSDDateTime;
-import org.apache.jena.datatypes.xsd.impl.XMLLiteralType;
 import org.apache.jena.rdf.model.Property;
+import org.apache.jena.vocabulary.RDF;
 import org.eclipse.lyo.core.util.StringUtils;
 import org.eclipse.lyo.oslc4j.core.model.ResourceShape;
 import org.eclipse.lyo.oslc4j.core.model.XMLLiteral;
@@ -82,7 +82,7 @@ public class OSLC4JUtils {
 	/**
 	 * This constant should be set to true when the property type is not
 	 * explicitly passed and it should be inferred from the resource shape. By
-	 * default this is set to false. This is part of the the fix for defect
+	 * default this is set to false. This is part of the fix for defect
 	 * 412789.
 	 */
 	private static String inferTypeFromShape = System.getProperty(OSLC4JConstants.OSLC4J_INFER_TYPE_FROM_SHAPE);
@@ -90,7 +90,7 @@ public class OSLC4JUtils {
 	/**
 	 * List of available ResourceShapes. This list will be used to infer the
 	 * property type from the resource shape and it will only be considered if
-	 * the property inferTypeFromShape is set to true. This is part of the the
+	 * the property inferTypeFromShape is set to true. This is part of the
 	 * fix for defect 412789.
 	 */
 	private static List<ResourceShape> shapes = new ArrayList<>();
@@ -681,7 +681,7 @@ public class OSLC4JUtils {
 	}
 
 	private static boolean isXmlLiteralProperty(final URI propValueType) {
-		return XMLLiteralType.theXMLLiteralType.getURI().equals(propValueType.toString());
+		return RDF.dtXMLLiteral.getURI().equals(propValueType.toString());
 	}
 
 	/**
