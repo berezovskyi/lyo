@@ -14,6 +14,9 @@
 package org.eclipse.lyo.oslc4j.provider.jena;
 
 import java.io.StringWriter;
+import java.lang.invoke.MethodHandle;
+import java.lang.invoke.MethodHandles;
+import java.lang.invoke.MethodType;
 import java.lang.reflect.Array;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
@@ -48,6 +51,7 @@ import java.util.Queue;
 import java.util.Set;
 import java.util.SortedSet;
 import java.util.TreeSet;
+import java.util.concurrent.ConcurrentHashMap;
 import javax.xml.XMLConstants;
 import javax.xml.datatype.DatatypeConfigurationException;
 import javax.xml.datatype.DatatypeFactory;
@@ -154,6 +158,121 @@ public final class JenaModelHelper {
   public static final String OSLC4J_STRICT_DATATYPES = "org.eclipse.lyo.oslc4j.strictDatatypes";
 
   private static final Logger logger = LoggerFactory.getLogger(JenaModelHelper.class);
+
+  private static final Map<Class<?>, ClassInfo> CLASS_INFO_CACHE = new ConcurrentHashMap<>();
+
+  private static class PropertyInfo {
+    final MethodHandle getter;
+    final Method method;
+    final OslcPropertyDefinition propertyDefinition;
+    final OslcName nameAnnotation;
+    final OslcValueType valueTypeAnnotation;
+    final OslcRdfCollectionType collectionTypeAnnotation;
+    final Class<?> returnType;
+
+    PropertyInfo(MethodHandle getter, Method method, OslcPropertyDefinition propertyDefinition) {
+      this.getter = getter;
+      this.method = method;
+      this.propertyDefinition = propertyDefinition;
+      this.nameAnnotation = InheritedMethodAnnotationHelper.getAnnotation(method, OslcName.class);
+      this.valueTypeAnnotation = InheritedMethodAnnotationHelper.getAnnotation(method, OslcValueType.class);
+      this.collectionTypeAnnotation = InheritedMethodAnnotationHelper.getAnnotation(method, OslcRdfCollectionType.class);
+      this.returnType = method.getReturnType();
+    }
+  }
+
+  private static class SetterInfo {
+    final MethodHandle methodHandle;
+    final Class<?> parameterType;
+    final Type genericParameterType;
+    final Method method;
+
+    SetterInfo(MethodHandle methodHandle, Method method) {
+      this.methodHandle = methodHandle;
+      this.method = method;
+      this.parameterType = method.getParameterTypes()[0];
+      this.genericParameterType = method.getGenericParameterTypes()[0];
+    }
+  }
+
+  private static class ClassInfo {
+    final Map<String, SetterInfo> setters = new HashMap<>();
+    final List<PropertyInfo> getters = new ArrayList<>();
+    final MethodHandle constructor;
+
+    ClassInfo(Class<?> beanClass) throws IllegalAccessException, NoSuchMethodException, OslcCoreMissingSetMethodException {
+      MethodHandles.Lookup lookup = MethodHandles.publicLookup();
+      MethodHandle ctor = null;
+      try {
+          ctor = lookup.findConstructor(beanClass, MethodType.methodType(void.class));
+      } catch (NoSuchMethodException | IllegalAccessException e) {
+          // Constructor might not be available or public. This is fine if we only use getters (marshalling).
+          // If we need to instantiate, we will check for null.
+      }
+      this.constructor = ctor;
+
+      for (final Method method : beanClass.getMethods()) {
+        if (method.getParameterTypes().length == 0) {
+          final String getMethodName = method.getName();
+
+          if (((getMethodName.startsWith(METHOD_NAME_START_GET))
+                  && (getMethodName.length() > METHOD_NAME_START_GET_LENGTH))
+              || ((getMethodName.startsWith(METHOD_NAME_START_IS))
+                  && (getMethodName.length() > METHOD_NAME_START_IS_LENGTH))) {
+            final OslcPropertyDefinition oslcPropertyDefinitionAnnotation =
+                InheritedMethodAnnotationHelper.getAnnotation(method, OslcPropertyDefinition.class);
+
+            if (oslcPropertyDefinitionAnnotation != null) {
+              // Store getter
+              MethodHandle getter = lookup.unreflect(method);
+              getters.add(new PropertyInfo(getter, method, oslcPropertyDefinitionAnnotation));
+
+              // We need to find the set companion setMethod
+              final String setMethodName;
+              if (getMethodName.startsWith(METHOD_NAME_START_GET)) {
+                setMethodName =
+                    METHOD_NAME_START_SET + getMethodName.substring(METHOD_NAME_START_GET_LENGTH);
+              } else {
+                setMethodName =
+                    METHOD_NAME_START_SET + getMethodName.substring(METHOD_NAME_START_IS_LENGTH);
+              }
+
+              final Class<?> getMethodReturnType = method.getReturnType();
+
+              try {
+                final Method setMethod = beanClass.getMethod(setMethodName, getMethodReturnType);
+                MethodHandle setter = lookup.unreflect(setMethod);
+                setters.put(oslcPropertyDefinitionAnnotation.value(), new SetterInfo(setter, setMethod));
+              } catch (final NoSuchMethodException exception) {
+                throw new OslcCoreMissingSetMethodException(beanClass, method, exception);
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  private static ClassInfo getClassInfo(Class<?> clazz) throws OslcCoreApplicationException {
+    ClassInfo info = CLASS_INFO_CACHE.get(clazz);
+    if (info != null) {
+      return info;
+    }
+    synchronized (CLASS_INFO_CACHE) {
+      info = CLASS_INFO_CACHE.get(clazz);
+      if (info != null) {
+        return info;
+      }
+      try {
+        info = new ClassInfo(clazz);
+        CLASS_INFO_CACHE.put(clazz, info);
+        return info;
+      } catch (IllegalAccessException | NoSuchMethodException e) {
+        // This should not happen as we catch exceptions in ClassInfo constructor or they are wrappers
+        throw new RuntimeException(e);
+      }
+    }
+  }
 
   private JenaModelHelper() {
     super();
@@ -383,8 +502,20 @@ public final class JenaModelHelper {
     if (mostConcreteResourceClass.isPresent()) {
       beanClass = mostConcreteResourceClass.get();
     }
-    final Object newInstance = beanClass.getDeclaredConstructor().newInstance();
-    final Map<Class<?>, Map<String, Method>> classPropertyDefinitionsToSetMethods = new HashMap<>();
+
+    ClassInfo info = getClassInfo(beanClass);
+    if (info.constructor == null) {
+        throw new InstantiationException("No public no-arg constructor found for " + beanClass.getName());
+    }
+    final Object newInstance;
+    try {
+        newInstance = info.constructor.invokeWithArguments();
+    } catch (Throwable t) {
+        if (t instanceof RuntimeException) throw (RuntimeException) t;
+        if (t instanceof Error) throw (Error) t;
+        throw new InstantiationException(t.getMessage());
+    }
+
     final Map<String, Object> visitedResources = new HashMap<>();
     final HashSet<String> rdfTypes = new HashSet<>();
 
@@ -393,7 +524,6 @@ public final class JenaModelHelper {
         buildReificationCache(resource.getModel());
 
     fromResource(
-        classPropertyDefinitionsToSetMethods,
         beanClass,
         newInstance,
         resource,
@@ -550,8 +680,6 @@ public final class JenaModelHelper {
           NoSuchMethodException {
     if (null != listSubjects) {
       ResourcePackages.mapPackage(beanClass.getPackage());
-      final Map<Class<?>, Map<String, Method>> classPropertyDefinitionsToSetMethods =
-          new HashMap<>();
       Class<?> originalBeanClass = beanClass;
       for (final Resource resource : listSubjects) {
         beanClass = originalBeanClass;
@@ -563,12 +691,22 @@ public final class JenaModelHelper {
             continue;
           }
         }
-        final Object newInstance = beanClass.getDeclaredConstructor().newInstance();
+        ClassInfo info = getClassInfo(beanClass);
+        if (info.constructor == null) {
+            throw new InstantiationException("No public no-arg constructor found for " + beanClass.getName());
+        }
+        final Object newInstance;
+        try {
+            newInstance = info.constructor.invokeWithArguments();
+        } catch (Throwable t) {
+            if (t instanceof RuntimeException) throw (RuntimeException) t;
+            if (t instanceof Error) throw (Error) t;
+            throw new InstantiationException(t.getMessage());
+        }
         final Map<String, Object> visitedResources = new HashMap<>();
         final HashSet<String> rdfTypes = new HashSet<>();
 
         fromResource(
-            classPropertyDefinitionsToSetMethods,
             beanClass,
             newInstance,
             resource,
@@ -585,7 +723,6 @@ public final class JenaModelHelper {
 
   @SuppressWarnings("unchecked")
   private static void fromResource(
-      final Map<Class<?>, Map<String, Method>> classPropertyDefinitionsToSetMethods,
       final Class<?> beanClass,
       final Object bean,
       final Resource resource,
@@ -601,12 +738,9 @@ public final class JenaModelHelper {
           URISyntaxException,
           SecurityException,
           NoSuchMethodException {
-    Map<String, Method> setMethodMap = classPropertyDefinitionsToSetMethods.get(beanClass);
-    if (setMethodMap == null) {
-      setMethodMap = createPropertyDefinitionToSetMethods(beanClass);
 
-      classPropertyDefinitionsToSetMethods.put(beanClass, setMethodMap);
-    }
+    ClassInfo classInfo = getClassInfo(beanClass);
+    Map<String, SetterInfo> setMethodMap = classInfo.setters;
 
     visitedResources.put(getVisitedResourceName(resource), bean);
 
@@ -630,7 +764,7 @@ public final class JenaModelHelper {
     final Map<String, List<Object>> propertyDefinitionsToArrayValues = new HashMap<>();
 
     // Ensure a single-value property is not set more than once
-    final Set<Method> singleValueMethodsUsed = new HashSet<>();
+    final Set<MethodHandle> singleValueMethodsUsed = new HashSet<>();
 
     final StmtIterator listProperties = resource.listProperties();
     final IExtendedResource extendedResource;
@@ -653,9 +787,9 @@ public final class JenaModelHelper {
       final Property predicate = statement.getPredicate();
       final RDFNode object = statement.getObject();
       final String uri = predicate.getURI();
-      final Method setMethod = setMethodMap.get(uri);
+      final SetterInfo setterInfo = setMethodMap.get(uri);
 
-      if (setMethod == null) {
+      if (setterInfo == null) {
         if (RDF_TYPE_URI.equals(uri)) {
           if (extendedResource != null) {
             final URI type = new URI(object.asResource().getURI());
@@ -695,7 +829,7 @@ public final class JenaModelHelper {
         }
       } else {
 
-        Class<?> setMethodComponentParameterClass = setMethod.getParameterTypes()[0];
+        Class<?> setMethodComponentParameterClass = setterInfo.parameterType;
 
         boolean multiple = setMethodComponentParameterClass.isArray();
 
@@ -704,7 +838,7 @@ public final class JenaModelHelper {
         } else if (Collection.class.isAssignableFrom(setMethodComponentParameterClass)) {
           multiple = true;
 
-          final Type genericParameterType = setMethod.getGenericParameterTypes()[0];
+          final Type genericParameterType = setterInfo.genericParameterType;
 
           if (genericParameterType instanceof ParameterizedType) {
             final ParameterizedType parameterizedType = (ParameterizedType) genericParameterType;
@@ -838,7 +972,7 @@ public final class JenaModelHelper {
 
                 if (OSLC4JUtils.relativeURIsAreDisabled() && !nestedResourceURI.isAbsolute()) {
                   throw new OslcCoreRelativeURIException(
-                      beanClass, setMethod.getName(), nestedResourceURI);
+                      beanClass, setterInfo.method.getName(), nestedResourceURI);
                 }
 
                 parameter = nestedResourceURI;
@@ -850,9 +984,19 @@ public final class JenaModelHelper {
                   optionalResourceClass.isPresent()
                       ? optionalResourceClass.get()
                       : setMethodComponentParameterClass;
-              final Object nestedBean = resourceClass.getDeclaredConstructor().newInstance();
+              ClassInfo info = getClassInfo(resourceClass);
+              if (info.constructor == null) {
+                  throw new InstantiationException("No public no-arg constructor found for " + resourceClass.getName());
+              }
+              final Object nestedBean;
+              try {
+                  nestedBean = info.constructor.invokeWithArguments();
+              } catch (Throwable t) {
+                  if (t instanceof RuntimeException) throw (RuntimeException) t;
+                  if (t instanceof Error) throw (Error) t;
+                  throw new InstantiationException(t.getMessage());
+              }
               fromResource(
-                  classPropertyDefinitionsToSetMethods,
                   nestedBean.getClass(),
                   nestedBean,
                   nestedResource,
@@ -891,7 +1035,6 @@ public final class JenaModelHelper {
                 Node reifiedNode = reifiedTriplesIter.next();
                 Resource reifiedStatement = getResource(statement.getModel(), reifiedNode);
                 fromResource(
-                    classPropertyDefinitionsToSetMethods,
                     reifiedClass,
                     reifiedResource,
                     reifiedStatement,
@@ -909,13 +1052,19 @@ public final class JenaModelHelper {
 
               values.add(parameter);
             } else {
-              if (singleValueMethodsUsed.contains(setMethod)) {
-                throw new OslcCoreMisusedOccursException(beanClass, setMethod);
+              if (singleValueMethodsUsed.contains(setterInfo.methodHandle)) {
+                throw new OslcCoreMisusedOccursException(beanClass, setterInfo.method);
               }
 
-              setMethod.invoke(bean, parameter);
+              try {
+                  setterInfo.methodHandle.invokeWithArguments(bean, parameter);
+              } catch (Throwable t) {
+                  if (t instanceof RuntimeException) throw (RuntimeException) t;
+                  if (t instanceof Error) throw (Error) t;
+                  throw new InvocationTargetException(t);
+              }
 
-              singleValueMethodsUsed.add(setMethod);
+              singleValueMethodsUsed.add(setterInfo.methodHandle);
             }
           }
         }
@@ -927,8 +1076,9 @@ public final class JenaModelHelper {
         propertyDefinitionsToArrayValues.entrySet()) {
       final String uri = propertyDefinitionToArrayValues.getKey();
       final List<Object> values = propertyDefinitionToArrayValues.getValue();
-      final Method setMethod = setMethodMap.get(uri);
-      final Class<?> parameterClass = setMethod.getParameterTypes()[0];
+      final SetterInfo setterInfo = setMethodMap.get(uri);
+      final MethodHandle setMethod = setterInfo.methodHandle;
+      final Class<?> parameterClass = setterInfo.parameterType;
 
       if (parameterClass.isArray()) {
         final Class<?> setMethodComponentParameterClass = parameterClass.getComponentType();
@@ -943,7 +1093,13 @@ public final class JenaModelHelper {
           Array.set(array, index++, value);
         }
 
-        setMethod.invoke(bean, array);
+        try {
+            setMethod.invokeWithArguments(bean, array);
+        } catch (Throwable t) {
+            if (t instanceof RuntimeException) throw (RuntimeException) t;
+            if (t instanceof Error) throw (Error) t;
+            throw new InvocationTargetException(t);
+        }
       }
       // Else - we are dealing with a collection or a subclass of collection
       else {
@@ -976,7 +1132,13 @@ public final class JenaModelHelper {
 
         collection.addAll(values);
 
-        setMethod.invoke(bean, collection);
+        try {
+            setMethod.invokeWithArguments(bean, collection);
+        } catch (Throwable t) {
+            if (t instanceof RuntimeException) throw (RuntimeException) t;
+            if (t instanceof Error) throw (Error) t;
+            throw new InvocationTargetException(t);
+        }
       }
     }
   }
@@ -1149,7 +1311,6 @@ public final class JenaModelHelper {
       final Map<Class<?>, Map<String, Method>> classPropertyDefinitionsToSetMethods =
           new HashMap<>();
       fromResource(
-          classPropertyDefinitionsToSetMethods,
           AnyResource.class,
           any,
           nestedResource,
@@ -1279,51 +1440,6 @@ public final class JenaModelHelper {
       return cache;
   }
 
-  private static Map<String, Method> createPropertyDefinitionToSetMethods(final Class<?> beanClass)
-      throws OslcCoreApplicationException {
-    final Map<String, Method> result = new HashMap<>();
-
-    final Method[] methods = beanClass.getMethods();
-
-    for (final Method method : methods) {
-      if (method.getParameterTypes().length == 0) {
-        final String getMethodName = method.getName();
-
-        if (((getMethodName.startsWith(METHOD_NAME_START_GET))
-                && (getMethodName.length() > METHOD_NAME_START_GET_LENGTH))
-            || ((getMethodName.startsWith(METHOD_NAME_START_IS))
-                && (getMethodName.length() > METHOD_NAME_START_IS_LENGTH))) {
-          final OslcPropertyDefinition oslcPropertyDefinitionAnnotation =
-              InheritedMethodAnnotationHelper.getAnnotation(method, OslcPropertyDefinition.class);
-
-          if (oslcPropertyDefinitionAnnotation != null) {
-            // We need to find the set companion setMethod
-            final String setMethodName;
-            if (getMethodName.startsWith(METHOD_NAME_START_GET)) {
-              setMethodName =
-                  METHOD_NAME_START_SET + getMethodName.substring(METHOD_NAME_START_GET_LENGTH);
-            } else {
-              setMethodName =
-                  METHOD_NAME_START_SET + getMethodName.substring(METHOD_NAME_START_IS_LENGTH);
-            }
-
-            final Class<?> getMethodReturnType = method.getReturnType();
-
-            try {
-              final Method setMethod = beanClass.getMethod(setMethodName, getMethodReturnType);
-
-              result.put(oslcPropertyDefinitionAnnotation.value(), setMethod);
-            } catch (final NoSuchMethodException exception) {
-              throw new OslcCoreMissingSetMethodException(beanClass, method, exception);
-            }
-          }
-        }
-      }
-    }
-
-    return result;
-  }
-
   private static void buildResource(
       final Object object,
       final Class<?> resourceClass,
@@ -1339,55 +1455,49 @@ public final class JenaModelHelper {
       return;
     }
 
-    for (final Method method : resourceClass.getMethods()) {
-      if (method.getParameterTypes().length == 0) {
-        final String methodName = method.getName();
+    ClassInfo classInfo = getClassInfo(resourceClass);
 
-        if (((methodName.startsWith(METHOD_NAME_START_GET))
-                && (methodName.length() > METHOD_NAME_START_GET_LENGTH))
-            || ((methodName.startsWith(METHOD_NAME_START_IS))
-                && (methodName.length() > METHOD_NAME_START_IS_LENGTH))) {
-          final OslcPropertyDefinition oslcPropertyDefinitionAnnotation =
-              InheritedMethodAnnotationHelper.getAnnotation(method, OslcPropertyDefinition.class);
+    for (final PropertyInfo getterInfo : classInfo.getters) {
+      final Object value;
+      try {
+          value = getterInfo.getter.invokeWithArguments(object);
+      } catch (Throwable t) {
+          if (t instanceof RuntimeException) throw (RuntimeException) t;
+          if (t instanceof Error) throw (Error) t;
+          throw new InvocationTargetException(t);
+      }
 
-          if (oslcPropertyDefinitionAnnotation != null) {
-            final Object value = method.invoke(object);
+      if (value != null) {
+        Map<String, Object> nestedProperties = null;
+        boolean onlyNested = false;
 
-            if (value != null) {
-              Map<String, Object> nestedProperties = null;
-              boolean onlyNested = false;
+        if (properties != null) {
+          @SuppressWarnings("unchecked")
+          final Map<String, Object> map =
+              (Map<String, Object>) properties.get(getterInfo.propertyDefinition.value());
 
-              if (properties != null) {
-                @SuppressWarnings("unchecked")
-                final Map<String, Object> map =
-                    (Map<String, Object>) properties.get(oslcPropertyDefinitionAnnotation.value());
-
-                if (map != null) {
-                  nestedProperties = map;
-                } else if (properties instanceof SingletonWildcardProperties
-                    && !(properties instanceof NestedWildcardProperties)) {
-                  nestedProperties = OSLC4JConstants.OSL4J_PROPERTY_SINGLETON;
-                } else if (properties instanceof NestedWildcardProperties) {
-                  nestedProperties =
-                      ((NestedWildcardProperties) properties).commonNestedProperties();
-                  onlyNested = !(properties instanceof SingletonWildcardProperties);
-                } else {
-                  continue;
-                }
-              }
-
-              buildAttributeResource(
-                  resourceClass,
-                  method,
-                  oslcPropertyDefinitionAnnotation,
-                  model,
-                  mainResource,
-                  value,
-                  nestedProperties,
-                  onlyNested);
-            }
+          if (map != null) {
+            nestedProperties = map;
+          } else if (properties instanceof SingletonWildcardProperties
+              && !(properties instanceof NestedWildcardProperties)) {
+            nestedProperties = OSLC4JConstants.OSL4J_PROPERTY_SINGLETON;
+          } else if (properties instanceof NestedWildcardProperties) {
+            nestedProperties =
+                ((NestedWildcardProperties) properties).commonNestedProperties();
+            onlyNested = !(properties instanceof SingletonWildcardProperties);
+          } else {
+            continue;
           }
         }
+
+        buildAttributeResource(
+            resourceClass,
+            getterInfo,
+            model,
+            mainResource,
+            value,
+            nestedProperties,
+            onlyNested);
       }
     }
 
@@ -1689,8 +1799,7 @@ public final class JenaModelHelper {
 
   private static void buildAttributeResource(
       final Class<?> resourceClass,
-      final Method method,
-      final OslcPropertyDefinition propertyDefinitionAnnotation,
+      final PropertyInfo propertyInfo,
       final Model model,
       Resource resource,
       final Object value,
@@ -1701,34 +1810,31 @@ public final class JenaModelHelper {
           IllegalArgumentException,
           InvocationTargetException,
           OslcCoreApplicationException {
-    final String propertyDefinition = propertyDefinitionAnnotation.value();
+    final String propertyDefinition = propertyInfo.propertyDefinition.value();
 
-    final OslcName nameAnnotation =
-        InheritedMethodAnnotationHelper.getAnnotation(method, OslcName.class);
+    final OslcName nameAnnotation = propertyInfo.nameAnnotation;
 
     final String name;
     if (nameAnnotation != null) {
       name = nameAnnotation.value();
     } else {
-      name = getDefaultPropertyName(method);
+      name = getDefaultPropertyName(propertyInfo.method);
     }
 
     if (!propertyDefinition.endsWith(name)) {
       throw new OslcCoreInvalidPropertyDefinitionException(
-          resourceClass, method, propertyDefinitionAnnotation);
+          resourceClass, propertyInfo.method, propertyInfo.propertyDefinition);
     }
 
-    final OslcValueType valueTypeAnnotation =
-        InheritedMethodAnnotationHelper.getAnnotation(method, OslcValueType.class);
+    final OslcValueType valueTypeAnnotation = propertyInfo.valueTypeAnnotation;
 
     final boolean xmlLiteral =
         valueTypeAnnotation != null && ValueType.XMLLiteral.equals(valueTypeAnnotation.value());
 
     final Property attribute = model.createProperty(propertyDefinition);
 
-    final Class<?> returnType = method.getReturnType();
-    final OslcRdfCollectionType collectionType =
-        InheritedMethodAnnotationHelper.getAnnotation(method, OslcRdfCollectionType.class);
+    final Class<?> returnType = propertyInfo.returnType;
+    final OslcRdfCollectionType collectionType = propertyInfo.collectionTypeAnnotation;
     final List<RDFNode> rdfNodeContainer;
 
     if (collectionType != null
@@ -1756,7 +1862,7 @@ public final class JenaModelHelper {
 
         handleLocalResource(
             resourceClass,
-            method,
+            propertyInfo.method,
             xmlLiteral,
             object,
             model,
@@ -1780,7 +1886,7 @@ public final class JenaModelHelper {
       for (final Object object : collection) {
         handleLocalResource(
             resourceClass,
-            method,
+            propertyInfo.method,
             xmlLiteral,
             object,
             model,
@@ -1800,7 +1906,7 @@ public final class JenaModelHelper {
     } else {
       handleLocalResource(
           resourceClass,
-          method,
+          propertyInfo.method,
           xmlLiteral,
           value,
           model,
