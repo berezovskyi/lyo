@@ -49,7 +49,6 @@ pipeline {
     stage('Publish (OSSRH)') {
       when {
         anyOf {
-          branch 'master'
           branch 'main'
           branch 'maint-*'
         }
@@ -61,16 +60,15 @@ pipeline {
         }
         sh '''
         mvn -B -fae clean install -DskipTests javadoc:aggregate \
-            -P dev,gpg-sign,!eclipse-deploy,central-deploy
+            -P dev,gpg-sign,central-deploy
         mvn -B      deploy        -DskipTests -Dmaven.install.skip=true \
-            -P dev,gpg-sign,!eclipse-deploy,central-deploy
+            -P dev,gpg-sign,central-deploy
         '''
       }
     }
     stage('Publish (Javadocs)') {
       when {
         anyOf {
-          branch 'master'
           branch 'main'
           branch 'maint-*'
         }
@@ -96,7 +94,6 @@ pipeline {
 //     stage('Publish (Eclipse)') {
 //       when {
 //         anyOf {
-//           branch 'master'
 //           branch 'main'
 //           branch 'maint-*'
 //         }
@@ -104,7 +101,7 @@ pipeline {
 //       steps {
 //         sh '''
 //         mvn -B      deploy        -DskipTests -Dmaven.install.skip=true \
-//             -P dev,gpg-sign,eclipse-deploy
+//             -P dev,gpg-sign,central-deploy
 //         '''
 //         // sh 'gpg --verify my-app/target/my-app-1.0-SNAPSHOT.jar.asc'
 //         sshagent(['projects-storage.eclipse.org-bot-ssh']) {
@@ -127,7 +124,7 @@ pipeline {
     stage('Publish HEAD Javadocs') {
       when {
         triggeredBy 'SCMTrigger'
-        branch 'master'
+        branch 'main'
       }
       steps {
         sshagent(['projects-storage.eclipse.org-bot-ssh']) {
